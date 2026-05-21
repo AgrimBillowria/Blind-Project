@@ -208,9 +208,9 @@ class IPhoneLiDARStream:
         if not self.running or self.server is None:
             return False, None, None
 
-        # Wait for camera frame with a timeout of 5.0 seconds for initial connection
+        # Wait for camera frame with a timeout of 60.0 seconds for initial connection
         # once connected, event will trigger rapidly at 30 fps
-        timeout_val = 5.0 if not self.connected else 2.0
+        timeout_val = 60.0 if not self.connected else 2.0
         frame_ready = self.event.wait(timeout=timeout_val)
         if not frame_ready or self.latest_rgb is None:
             return False, None, None
