@@ -1,0 +1,14 @@
+# Requirements for AI Navigation Assistant
+# Install with: pip install -r requirements.txt
+
+# Core CV library
+opencv-python>=4.8.0
+
+# YOLOv8 by Ultralytics
+ultralytics>=8.0.0
+
+# Offline text-to-speech engine
+pyttsx3>=2.90
+
+# NumPy (usually installed with OpenCV, listed for completeness)
+numpy>=1.24.0
