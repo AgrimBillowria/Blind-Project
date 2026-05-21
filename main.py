@@ -51,7 +51,7 @@ def parse_arguments():
     parser.add_argument("--camera", type=int, default=CAMERA_INDEX,
                         help=f"Camera index to use (default: {CAMERA_INDEX})")
     parser.add_argument("--iphone", action="store_true",
-                        help="Use USB connected iPhone 13 Pro LiDAR sensor")
+                        help="Use wireless iPhone 13 Pro LiDAR sensor (Arvos)")
     return parser.parse_args()
 
 

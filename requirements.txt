@@ -13,6 +13,8 @@ pyttsx3>=2.90
 # NumPy (usually installed with OpenCV, listed for completeness)
 numpy>=1.24.0
 
-# Record3D iOS LiDAR Stream Library
-record3d>=1.4.1
+# Arvos open-source sensor streaming dependencies
+arvos-sdk>=1.0.0
+qrcode>=8.2
+websockets>=16.0
 
