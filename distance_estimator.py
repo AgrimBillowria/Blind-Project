@@ -38,6 +38,7 @@ and clearly demonstrates understanding of camera geometry.
 ──────────────────────────────────────────────────────────────────────
 """
 
+import numpy as np
 from config import FOCAL_LENGTH, KNOWN_WIDTHS, DEFAULT_OBJECT_WIDTH
 
 
@@ -96,6 +97,58 @@ def estimate_all_distances(detections):
         bbox_width = det["width"]
         dist = estimate_distance(label, bbox_width)
         distances[i] = dist
+
+    return distances
+
+
+def estimate_all_distances_lidar(detections, depth_frame, rgb_shape):
+    """
+    Estimate distances using real LiDAR depth data.
+    Falls back to the pinhole model if depth data is missing or has invalid measurements.
+
+    Parameters:
+        detections (list): Output from object_detector.detect_objects()
+        depth_frame (numpy.ndarray): LiDAR depth map in meters (float32)
+        rgb_shape (tuple): Shape of the RGB frame (height, width, channels)
+
+    Returns:
+        distances (dict): Maps detection index → estimated distance in cm
+    """
+    distances = {}
+    if depth_frame is None:
+        return estimate_all_distances(detections)
+
+    depth_h, depth_w = depth_frame.shape[:2]
+    rgb_h, rgb_w = rgb_shape[:2]
+
+    for i, det in enumerate(detections):
+        x1, y1, x2, y2 = det["bbox"]
+
+        # Scale coordinates from the RGB resolution to the LiDAR depth map resolution
+        d_x1 = int(x1 * depth_w / rgb_w)
+        d_y1 = int(y1 * depth_h / rgb_h)
+        d_x2 = int(x2 * depth_w / rgb_w)
+        d_y2 = int(y2 * depth_h / rgb_h)
+
+        # Restrict within depth map boundary limits
+        d_x1 = max(0, min(d_x1, depth_w - 1))
+        d_y1 = max(0, min(d_y1, depth_h - 1))
+        d_x2 = max(0, min(d_x2, depth_w - 1))
+        d_y2 = max(0, min(d_y2, depth_h - 1))
+
+        # Extract the depth region of interest (ROI)
+        if d_x2 > d_x1 and d_y2 > d_y1:
+            depth_roi = depth_frame[d_y1:d_y2, d_x1:d_x2]
+            # Filter out non-finite (NaN, inf) and invalid (<= 0) depth values
+            valid_depths = depth_roi[np.isfinite(depth_roi) & (depth_roi > 0.0)]
+            if len(valid_depths) > 0:
+                # 25th percentile represents the closer part of the obstacle for safety
+                distance_m = float(np.percentile(valid_depths, 25))
+                distances[i] = distance_m * 100.0  # Convert meters to cm
+                continue
+
+        # Fallback to pinhole camera estimation if LiDAR has no reading in this bounding box
+        distances[i] = estimate_distance(det["label"], det["width"])
 
     return distances
 

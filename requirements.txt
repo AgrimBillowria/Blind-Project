@@ -12,3 +12,7 @@ pyttsx3>=2.90
 
 # NumPy (usually installed with OpenCV, listed for completeness)
 numpy>=1.24.0
+
+# Record3D iOS LiDAR Stream Library
+record3d>=1.4.1
+

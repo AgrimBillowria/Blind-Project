@@ -28,7 +28,10 @@ from config import (
 )
 from object_detector import detect_objects, draw_detections
 from stair_detector import detect_stairs, draw_stair_warning
-from distance_estimator import estimate_all_distances, get_closest_object, classify_distance
+from distance_estimator import (
+    estimate_all_distances, estimate_all_distances_lidar,
+    get_closest_object, classify_distance
+)
 from voice_assistant import speak, generate_navigation_message
 from utils import (
     resize_frame, draw_zone_lines, draw_status_bar, draw_title_bar,
@@ -47,6 +50,8 @@ def parse_arguments():
                         help="Path to an image file to process (single frame mode)")
     parser.add_argument("--camera", type=int, default=CAMERA_INDEX,
                         help=f"Camera index to use (default: {CAMERA_INDEX})")
+    parser.add_argument("--iphone", action="store_true",
+                        help="Use USB connected iPhone 13 Pro LiDAR sensor")
     return parser.parse_args()
 
 
@@ -79,7 +84,7 @@ def open_camera(camera_index):
     return None
 
 
-def process_frame(frame, frame_count, show_features):
+def process_frame(frame, frame_count, show_features, depth_frame=None):
     """
     Run the full detection pipeline on a single frame.
 
@@ -94,8 +99,11 @@ def process_frame(frame, frame_count, show_features):
     # ── Step 2: Object detection (YOLOv8) ──
     detections = detect_objects(frame)
 
-    # ── Step 3: Distance estimation (pinhole camera model) ──
-    distances = estimate_all_distances(detections)
+    # ── Step 3: Distance estimation (LiDAR vs Pinhole) ──
+    if depth_frame is not None:
+        distances = estimate_all_distances_lidar(detections, depth_frame, frame.shape)
+    else:
+        distances = estimate_all_distances(detections)
 
     # ── Step 4: Stair detection (every 3rd frame to save CPU) ──
     stairs_detected = False
@@ -122,7 +130,8 @@ def process_frame(frame, frame_count, show_features):
         frame = draw_orb_features(frame, keypoints)
 
     # Title bar
-    draw_title_bar(frame, "AI Navigation Assistant")
+    title_text = "AI Navigation Assistant (LiDAR)" if depth_frame is not None else "AI Navigation Assistant"
+    draw_title_bar(frame, title_text)
 
     # Status bar with navigation message
     status_color = {
@@ -291,6 +300,107 @@ def run_video_mode(source, is_webcam=True, camera_index=0):
     print("[INFO] System shut down cleanly.")
 
 
+def run_iphone_mode():
+    """
+    Main processing loop for iPhone 13 Pro LiDAR mode.
+    """
+    from iphone_lidar import IPhoneLiDARStream
+
+    stream = IPhoneLiDARStream()
+    try:
+        stream.start()
+    except RuntimeError as e:
+        print()
+        print("=" * 60)
+        print("  ⚠️  IPHONE CONNECTION ERROR")
+        print("=" * 60)
+        print(e)
+        print("=" * 60)
+        sys.exit(1)
+
+    show_features = False
+    frame_count = 0
+    fps = 0
+    prev_time = time.time()
+    screenshot_count = 0
+
+    print(f"[INFO] System started. Source: {stream.device_name}")
+    speak("iPhone LiDAR navigation assistant started")
+
+    while True:
+        success, frame, depth_frame = stream.read()
+        if not success:
+            print("[ERROR] Failed to read frame from iPhone LiDAR stream.")
+            break
+
+        frame_count += 1
+
+        # Run the full pipeline (using LiDAR distances)
+        frame, nav_message, priority = process_frame(
+            frame, frame_count, show_features, depth_frame=depth_frame
+        )
+
+        # ── Trigger voice alert ──
+        if priority in ("DANGER", "STAIR"):
+            speak(nav_message)
+        elif priority == "WARNING" and frame_count % 10 == 0:
+            speak(nav_message)
+        elif priority == "CLEAR" and frame_count % 30 == 0:
+            speak(nav_message)
+
+        # ── FPS counter ──
+        current_time = time.time()
+        fps = 1.0 / (current_time - prev_time + 1e-6)
+        prev_time = current_time
+        cv2.putText(
+            frame, f"FPS: {fps:.1f}", (FRAME_WIDTH - 110, 55),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA
+        )
+
+        # ── Colormap and overlay the depth map for visualization ──
+        depth_vis = depth_frame.copy()
+        depth_vis[~np.isfinite(depth_vis)] = 0.0
+        max_depth = 5.0
+        depth_vis = np.clip(depth_vis, 0.0, max_depth)
+        depth_norm = (depth_vis / max_depth * 255.0).astype(np.uint8)
+        depth_norm_inv = 255 - depth_norm
+        depth_colored = cv2.applyColorMap(depth_norm_inv, cv2.COLORMAP_JET)
+
+        # Resize depth map visualization to match frame height for side-by-side display
+        depth_h_target = frame.shape[0]
+        depth_w_target = int(depth_colored.shape[1] * depth_h_target / depth_colored.shape[0])
+        depth_colored_resized = cv2.resize(depth_colored, (depth_w_target, depth_h_target))
+
+        # Concatenate RGB feed and Depth map side-by-side
+        combined_display = np.hstack((frame, depth_colored_resized))
+
+        # ── Display ──
+        cv2.imshow(WINDOW_TITLE, combined_display)
+
+        # ── Handle keyboard input ──
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            print("[INFO] Quitting...")
+            speak("Navigation assistant stopped")
+            break
+        elif key == ord('f'):
+            show_features = not show_features
+            state = "ON" if show_features else "OFF"
+            print(f"[INFO] ORB feature visualization: {state}")
+        elif key == ord('s'):
+            screenshot_count += 1
+            filename = f"screenshot_rgb_{screenshot_count}.jpg"
+            filename_depth = f"screenshot_depth_{screenshot_count}.jpg"
+            cv2.imwrite(filename, frame)
+            cv2.imwrite(filename_depth, depth_colored)
+            print(f"[INFO] Screenshots saved: {filename} and {filename_depth}")
+
+    # ── Cleanup ──
+    stream.release()
+    cv2.destroyAllWindows()
+    print("[INFO] System shut down cleanly.")
+
+
 def main():
     """Entry point — parse args and launch the appropriate mode."""
     args = parse_arguments()
@@ -307,6 +417,8 @@ def main():
         run_image_mode(args.image)
     elif args.video:
         run_video_mode(args.video, is_webcam=False)
+    elif args.iphone:
+        run_iphone_mode()
     else:
         run_video_mode(None, is_webcam=True, camera_index=args.camera)
 
