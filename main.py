@@ -439,6 +439,62 @@ def run_iphone_mode():
     print("[INFO] System shut down cleanly.")
 
 
+def ask_interface_mode() -> str:
+    """
+    Prompt the user to choose between Python window and browser mode.
+    Returns '1' (Python window) or '2' (browser).
+    """
+    print()
+    print("  ┌───────────────────────────────────────────┐")
+    print("  │        Select Interface Mode              │")
+    print("  │                                           │")
+    print("  │   [1]  Python Window  (OpenCV display)    │")
+    print("  │   [2]  Browser Mode   (React web app)     │")
+    print("  │                                           │")
+    print("  └───────────────────────────────────────────┘")
+    print()
+    while True:
+        choice = input("  Enter 1 or 2: ").strip()
+        if choice in ("1", "2"):
+            return choice
+        print("  Please enter 1 or 2.")
+
+
+def start_browser_mode() -> None:
+    """
+    Start the FastAPI/uvicorn backend so the React frontend can connect.
+    Blocks until the user presses Ctrl+C.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        print()
+        print("[ERROR] uvicorn is not installed.")
+        print("        Run:  pip install uvicorn[standard]")
+        sys.exit(1)
+
+    import webbrowser, threading
+
+    print()
+    print("=" * 60)
+    print("  Browser Mode — Web server starting on port 8000")
+    print("  ─────────────────────────────────────────────────────")
+    print("  Backend : http://localhost:8000")
+    print("  Frontend: http://localhost:5173")
+    print("  (Make sure 'npm run dev' is running in frontend/)")
+    print("  Press Ctrl+C to stop")
+    print("=" * 60)
+
+    # Open the React dev server in the browser after a short delay
+    def _open_browser():
+        import time; time.sleep(1.5)
+        webbrowser.open("http://localhost:5173")
+
+    threading.Thread(target=_open_browser, daemon=True).start()
+
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+
+
 def main():
     """Entry point — parse args and launch the appropriate mode."""
     args = parse_arguments()
@@ -451,6 +507,7 @@ def main():
     print("  Press 's' to save a screenshot")
     print("=" * 60)
 
+    # CLI flags bypass the mode prompt entirely
     if args.image:
         run_image_mode(args.image)
     elif args.video:
@@ -458,20 +515,24 @@ def main():
     elif args.iphone:
         run_iphone_mode()
     else:
-        # No CLI mode flag — show the graphical launcher so the user can
-        # pick Camera or Video mode and select a camera / file interactively.
-        launcher_result = show_launcher()
-        if launcher_result is None:
-            # User closed the launcher window — exit cleanly
-            print("[INFO] Launcher closed. Exiting.")
-            return
-        if launcher_result["mode"] == "video":
-            run_video_mode(launcher_result["video_path"], is_webcam=False)
+        # Ask which interface to use
+        interface = ask_interface_mode()
+
+        if interface == "2":
+            start_browser_mode()
         else:
-            run_video_mode(
-                None, is_webcam=True,
-                camera_index=launcher_result["camera_index"]
-            )
+            # Python window — show the tkinter launcher
+            launcher_result = show_launcher()
+            if launcher_result is None:
+                print("[INFO] Launcher closed. Exiting.")
+                return
+            if launcher_result["mode"] == "video":
+                run_video_mode(launcher_result["video_path"], is_webcam=False)
+            else:
+                run_video_mode(
+                    None, is_webcam=True,
+                    camera_index=launcher_result["camera_index"]
+                )
 
 
 if __name__ == "__main__":
