@@ -12,7 +12,7 @@ Syllabus concepts covered:
 # ─────────────────────────────────────────────
 # 1. Camera / Frame Settings
 # ─────────────────────────────────────────────
-CAMERA_INDEX = 1                # Webcam index (found at index 1 on this machine)
+CAMERA_INDEX = 0                # Webcam index (0 = built-in laptop camera on Windows)
 FRAME_WIDTH = 640               # Processing width in pixels
 FRAME_HEIGHT = 480              # Processing height in pixels
 

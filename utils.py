@@ -199,12 +199,12 @@ def draw_zone_lines(frame):
     cv2.line(frame, (left_x, 0), (left_x, h), (100, 100, 100), 1, cv2.LINE_AA)
     cv2.line(frame, (right_x, 0), (right_x, h), (100, 100, 100), 1, cv2.LINE_AA)
 
-    # Zone labels at the top
-    cv2.putText(frame, "LEFT", (10, 20),
+    # Zone labels below the title bar (title bar covers y=0–35)
+    cv2.putText(frame, "LEFT", (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
-    cv2.putText(frame, "CENTER", (left_x + 10, 20),
+    cv2.putText(frame, "CENTER", (left_x + 10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
-    cv2.putText(frame, "RIGHT", (right_x + 10, 20),
+    cv2.putText(frame, "RIGHT", (right_x + 10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
 
     return frame

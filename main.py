@@ -18,6 +18,7 @@ import time
 import sys
 import argparse
 import os
+import platform
 import numpy as np
 
 # ── Import project modules ──
@@ -37,6 +38,7 @@ from utils import (
     resize_frame, draw_zone_lines, draw_status_bar, draw_title_bar,
     detect_orb_features, draw_orb_features, convert_to_grayscale,
 )
+from launcher import show_launcher
 
 
 def parse_arguments():
@@ -58,40 +60,64 @@ def parse_arguments():
 def open_camera(camera_index):
     """
     Try to open the webcam, with fallback to other camera indices.
+
+    On Windows, DirectShow (CAP_DSHOW) is tried first — it initialises
+    faster and is more reliable than the default MSMF backend for built-in
+    laptop cameras.  Up to 5 warm-up frames are skipped because many Windows
+    webcam drivers return black/corrupt frames on the very first reads.
+
     Returns an opened VideoCapture or None.
     """
-    # Try the requested camera index first
-    cap = cv2.VideoCapture(camera_index)
-    if cap.isOpened():
-        ret, frame = cap.read()
-        if ret and frame is not None:
-            return cap
-        cap.release()
+    # On Windows prefer DirectShow; elsewhere use the OpenCV default (0 = auto)
+    backends = [cv2.CAP_DSHOW, 0] if platform.system() == "Windows" else [0]
 
-    # Try alternative camera indices (0, 1, 2)
+    def try_open(idx):
+        for backend in backends:
+            cap = cv2.VideoCapture(idx, backend) if backend else cv2.VideoCapture(idx)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            # Drain up to 5 warm-up frames; accept the cap once a valid frame arrives
+            for _ in range(5):
+                ret, frame = cap.read()
+                if ret and frame is not None and frame.size > 0 and frame.any():
+                    return cap
+            cap.release()
+        return None
+
+    # Try the requested index first
+    cap = try_open(camera_index)
+    if cap is not None:
+        return cap
+
+    # Fallback to other common indices
     for idx in [0, 1, 2]:
         if idx == camera_index:
             continue
         print(f"[INFO] Trying camera index {idx}...")
-        cap = cv2.VideoCapture(idx)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                print(f"[INFO] Camera found at index {idx}")
-                return cap
-            cap.release()
+        cap = try_open(idx)
+        if cap is not None:
+            print(f"[INFO] Camera found at index {idx}")
+            return cap
 
     return None
 
 
-def process_frame(frame, frame_count, show_features, depth_frame=None):
+def process_frame(frame, frame_count, show_features, depth_frame=None,
+                  last_stairs=False, last_stair_region=None):
     """
     Run the full detection pipeline on a single frame.
+
+    Parameters:
+        last_stairs       : stair state from the previous frame (avoids flicker)
+        last_stair_region : stair region from the previous frame
 
     Returns:
         frame        : annotated frame
         nav_message  : navigation instruction string
         priority     : priority level string
+        stairs_detected  : current stair state (to persist across calls)
+        stair_region     : current stair region (to persist across calls)
     """
     # ── Step 1: Resize for consistent processing ──
     frame = resize_frame(frame)
@@ -106,8 +132,9 @@ def process_frame(frame, frame_count, show_features, depth_frame=None):
         distances = estimate_all_distances(detections)
 
     # ── Step 4: Stair detection (every 3rd frame to save CPU) ──
-    stairs_detected = False
-    stair_region = None
+    # Persist previous stair state so the warning doesn't flicker on skipped frames.
+    stairs_detected = last_stairs
+    stair_region = last_stair_region
     if frame_count % 3 == 0:
         stairs_detected, stair_region, _ = detect_stairs(frame)
 
@@ -148,7 +175,7 @@ def process_frame(frame, frame_count, show_features, depth_frame=None):
         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA
     )
 
-    return frame, nav_message, priority
+    return frame, nav_message, priority, stairs_detected, stair_region
 
 
 def run_image_mode(image_path):
@@ -165,7 +192,7 @@ def run_image_mode(image_path):
         sys.exit(1)
 
     speak("Processing image")
-    frame, nav_message, priority = process_frame(frame, 1, False)
+    frame, nav_message, priority, _, _ = process_frame(frame, 1, False)
     speak(nav_message)
 
     print(f"[RESULT] {nav_message} (Priority: {priority})")
@@ -218,6 +245,9 @@ def run_video_mode(source, is_webcam=True, camera_index=0):
 
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+        actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"[INFO] Camera resolution: {actual_w}x{actual_h}")
         source_name = "Webcam"
     else:
         if not os.path.exists(source):
@@ -235,6 +265,8 @@ def run_video_mode(source, is_webcam=True, camera_index=0):
     fps = 0
     prev_time = time.time()
     screenshot_count = 0
+    last_stairs = False
+    last_stair_region = None
 
     print(f"[INFO] System started. Source: {source_name}")
     speak("Navigation assistant started")
@@ -255,7 +287,10 @@ def run_video_mode(source, is_webcam=True, camera_index=0):
         frame_count += 1
 
         # Run the full pipeline
-        frame, nav_message, priority = process_frame(frame, frame_count, show_features)
+        frame, nav_message, priority, last_stairs, last_stair_region = process_frame(
+            frame, frame_count, show_features,
+            last_stairs=last_stairs, last_stair_region=last_stair_region
+        )
 
         # ── Trigger voice alert ──
         if priority in ("DANGER", "STAIR"):
@@ -323,6 +358,8 @@ def run_iphone_mode():
     fps = 0
     prev_time = time.time()
     screenshot_count = 0
+    last_stairs = False
+    last_stair_region = None
 
     print(f"[INFO] System started. Source: {stream.device_name}")
     speak("iPhone LiDAR navigation assistant started")
@@ -330,14 +367,15 @@ def run_iphone_mode():
     while True:
         success, frame, depth_frame = stream.read()
         if not success:
-            print("[ERROR] Failed to read frame from iPhone LiDAR stream.")
-            break
+            print("[WARN] Failed to read frame — retrying...")
+            continue
 
         frame_count += 1
 
         # Run the full pipeline (using LiDAR distances)
-        frame, nav_message, priority = process_frame(
-            frame, frame_count, show_features, depth_frame=depth_frame
+        frame, nav_message, priority, last_stairs, last_stair_region = process_frame(
+            frame, frame_count, show_features, depth_frame=depth_frame,
+            last_stairs=last_stairs, last_stair_region=last_stair_region
         )
 
         # ── Trigger voice alert ──
@@ -420,7 +458,20 @@ def main():
     elif args.iphone:
         run_iphone_mode()
     else:
-        run_video_mode(None, is_webcam=True, camera_index=args.camera)
+        # No CLI mode flag — show the graphical launcher so the user can
+        # pick Camera or Video mode and select a camera / file interactively.
+        launcher_result = show_launcher()
+        if launcher_result is None:
+            # User closed the launcher window — exit cleanly
+            print("[INFO] Launcher closed. Exiting.")
+            return
+        if launcher_result["mode"] == "video":
+            run_video_mode(launcher_result["video_path"], is_webcam=False)
+        else:
+            run_video_mode(
+                None, is_webcam=True,
+                camera_index=launcher_result["camera_index"]
+            )
 
 
 if __name__ == "__main__":

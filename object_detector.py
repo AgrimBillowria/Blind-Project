@@ -27,6 +27,8 @@ from config import (
     COLOR_SAFE,
     FONT_SCALE,
     FONT_THICKNESS,
+    DANGER_DISTANCE,
+    WARNING_DISTANCE,
 )
 import cv2
 
@@ -142,9 +144,9 @@ def draw_detections(frame, detections, distances=None):
         color = COLOR_SAFE  # default green
         if distances and i in distances:
             dist = distances[i]
-            if dist < 100:
+            if dist < DANGER_DISTANCE:
                 color = COLOR_DANGER    # Red — too close
-            elif dist < 200:
+            elif dist < WARNING_DISTANCE:
                 color = COLOR_WARNING   # Orange — caution
             else:
                 color = COLOR_SAFE      # Green — safe

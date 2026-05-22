@@ -39,7 +39,7 @@ and clearly demonstrates understanding of camera geometry.
 """
 
 import numpy as np
-from config import FOCAL_LENGTH, KNOWN_WIDTHS, DEFAULT_OBJECT_WIDTH
+from config import FOCAL_LENGTH, KNOWN_WIDTHS, DEFAULT_OBJECT_WIDTH, DANGER_DISTANCE, WARNING_DISTANCE
 
 
 def estimate_distance(label, bbox_width):
@@ -188,9 +188,9 @@ def classify_distance(distance_cm):
 
     These thresholds are also defined in config.py.
     """
-    if distance_cm < 100:
+    if distance_cm < DANGER_DISTANCE:
         return "DANGER"
-    elif distance_cm < 200:
+    elif distance_cm < WARNING_DISTANCE:
         return "WARNING"
     else:
         return "SAFE"

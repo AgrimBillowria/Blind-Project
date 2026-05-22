@@ -62,15 +62,24 @@ class IPhoneLiDARStream:
                     h, w = self.latest_rgb.shape[:2]
                     self.latest_depth = self.project_point_cloud(pts, self.latest_intrinsics, w, h)
             elif depth_frame.format == "raw_depth":
-                # Reshape raw float32 buffer
+                # Reshape raw float32 buffer into a 2D depth map.
+                # Standard ARKit depth resolutions are 256×192 or 320×240.
                 num_elements = len(depth_frame.data) // 4
-                # Standard ARKit depth map resolutions: 256x192 or similar
                 if num_elements == 256 * 192:
                     self.latest_depth = np.frombuffer(depth_frame.data, dtype=np.float32).reshape((192, 256))
-                elif num_elements == 192 * 256:
-                    self.latest_depth = np.frombuffer(depth_frame.data, dtype=np.float32).reshape((256, 192))
+                elif num_elements == 320 * 240:
+                    self.latest_depth = np.frombuffer(depth_frame.data, dtype=np.float32).reshape((240, 320))
                 else:
-                    self.latest_depth = np.frombuffer(depth_frame.data, dtype=np.float32)
+                    # Unknown resolution — try to infer a square-ish shape.
+                    # If that fails, skip this frame to avoid storing a 1D array
+                    # which would crash downstream (estimate_all_distances_lidar
+                    # and the depth visualizer both expect a 2D array).
+                    side = int(num_elements ** 0.5)
+                    if side * side == num_elements:
+                        self.latest_depth = np.frombuffer(depth_frame.data, dtype=np.float32).reshape((side, side))
+                    else:
+                        print(f"[DEBUG] Unknown depth resolution: {num_elements} elements — skipping frame")
+                        return
         except Exception as e:
             print(f"[DEBUG] Error decoding depth frame: {e}")
 

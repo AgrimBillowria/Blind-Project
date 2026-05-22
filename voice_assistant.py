@@ -10,13 +10,8 @@ Syllabus: Scene Understanding (translating visual data to guidance)
 import pyttsx3
 import threading
 import time
-from config import VOICE_COOLDOWN, VOICE_RATE, VOICE_VOLUME
+from config import VOICE_COOLDOWN, VOICE_RATE, VOICE_VOLUME, FRAME_WIDTH, DANGER_DISTANCE, WARNING_DISTANCE
 
-
-# ── Initialize the TTS engine ──
-engine = pyttsx3.init()
-engine.setProperty('rate', VOICE_RATE)
-engine.setProperty('volume', VOICE_VOLUME)
 
 # Track the last time each message was spoken to implement cooldown
 _last_spoken = {}
@@ -53,13 +48,21 @@ def speak(message):
 
 
 def _speak_threaded(message):
-    """Internal: run TTS engine in a thread-safe manner."""
+    """Internal: run TTS engine in a thread-safe manner.
+
+    A new engine instance is created per call because pyttsx3 uses COM
+    (SAPI5) on Windows, which has thread affinity. Reusing an engine
+    created on the main thread from a worker thread causes deadlocks.
+    """
     with _speak_lock:
         try:
-            engine.say(message)
-            engine.runAndWait()
-        except RuntimeError:
-            # Handle edge case: engine already running
+            _engine = pyttsx3.init()
+            _engine.setProperty('rate', VOICE_RATE)
+            _engine.setProperty('volume', VOICE_VOLUME)
+            _engine.say(message)
+            _engine.runAndWait()
+            _engine.stop()
+        except Exception:
             pass
 
 
@@ -92,9 +95,7 @@ def generate_navigation_message(detections, distances, stairs_detected):
         label = closest_det["label"]
 
         # Determine zone (LEFT / CENTER / RIGHT)
-        # We assume frame width of 640 from config
-        frame_width = 640
-        relative_x = x_center / frame_width
+        relative_x = x_center / FRAME_WIDTH
 
         if relative_x < 0.33:
             direction = "on your left, move right"
@@ -103,10 +104,10 @@ def generate_navigation_message(detections, distances, stairs_detected):
         else:
             direction = "directly ahead"
 
-        if closest_dist < 100:
+        if closest_dist < DANGER_DISTANCE:
             msg = f"Warning! {label} {direction}, very close"
             return msg, "DANGER"
-        elif closest_dist < 200:
+        elif closest_dist < WARNING_DISTANCE:
             msg = f"Caution, {label} {direction}"
             return msg, "WARNING"
 
